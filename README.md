@@ -6,3 +6,7 @@ BLE_Fingerprinting_example2.m reads 20 example BLE signals received by a Softwar
 Citation: H. Givehchian, N. Bhaskar, E. R. Herrera, H. R. L. Soto, C. Dameff,D. Bharadia, and A. Schulman, 
           “Evaluating Physical-Layer BLE Location Tracking Attacks on Mobile Devices,” 
           in 2022 IEEE Symposium on Security and Privacy, 2022
+
+## Requirements
+- MATLAB
+- Signal Processing Toolbox
