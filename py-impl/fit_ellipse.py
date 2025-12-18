@@ -1,123 +1,95 @@
 import numpy as np
 import warnings
 
-def fit_ellipse(x, y, axis_handle=None):
-    """
-    Finds the best fit to an ellipse for the given set of points.
 
-    Parameters:
-    - x, y: Arrays of coordinates.
-    - axis_handle: Placeholder for compatibility (plotting not implemented here).
+def fit_ellipse(x, y, orientation_tolerance=1e-7):
+    x = np.asarray(x).ravel()
+    y = np.asarray(y).ravel()
+    if x.size < 5:
+        raise ValueError("Need at least 5 points")
 
-    Returns:
-    - dictionary containing ellipse parameters.
-    """
-    orientation_tolerance = 1e-7
+    # X @ p ≈ 1, where p = [A,B,C,D,E] and A x^2 + B x y + C y^2 + D x + E y ≈ 1
+    X = np.column_stack([x**2, x * y, y**2, x, y])
+    ones = np.ones_like(x)
 
-    # Prepare vectors
-    x = np.array(x).flatten()
-    y = np.array(y).flatten()
+    # More stable than solving (X.T@X)p = X.T@1
+    p, *_ = np.linalg.lstsq(X, ones, rcond=None)
+    A, B, C, D, E = p
 
-    mean_x = np.mean(x)
-    mean_y = np.mean(y)
+    # Remove orientation if needed
+    if (
+        min(abs(B / A) if A != 0 else np.inf, abs(B / C) if C != 0 else np.inf)
+        > orientation_tolerance
+    ):
+        phi = 0.5 * np.arctan2(B, (C - A))
+        cphi, sphi = np.cos(phi), np.sin(phi)
 
-    # MATLAB code comments out mean subtraction, so we use raw x, y
-    # X = [x.^2, x.*y, y.^2, x, y ]
-    X = np.column_stack([x**2, x*y, y**2, x, y])
+        At = A * cphi**2 - B * cphi * sphi + C * sphi**2
+        Bt = 0.0
+        Ct = A * sphi**2 + B * cphi * sphi + C * cphi**2
+        Dt = D * cphi - E * sphi
+        Et = D * sphi + E * cphi
 
-    # Estimate parameters: a = sum(X)/(X'*X)
-    # Equation: a * (X.T @ X) = sum(X) -> (X.T @ X).T * a.T = sum(X).T
-    # Since X.T @ X is symmetric: (X.T @ X) * a.T = sum(X).T
-    try:
-        lhs = X.T @ X
-        rhs = np.sum(X, axis=0)
-        a_vec = np.linalg.solve(lhs, rhs)
-    except np.linalg.LinAlgError:
-        warnings.warn('Matrix inversion failed in fit_ellipse')
+        A, B, C, D, E = At, Bt, Ct, Dt, Et
+    else:
+        phi = 0.0
+        cphi, sphi = 1.0, 0.0
+
+    # Check ellipse (in this rotated form, need A and C same sign)
+    test = A * C
+    if test <= 0:
+        status = "Parabola found" if test == 0 else "Hyperbola found"
+        warnings.warn(f"fit_ellipse: Did not locate an ellipse ({status})")
+        return {
+            "a": None,
+            "b": None,
+            "phi": None,
+            "X0": None,
+            "Y0": None,
+            "X0_in": None,
+            "Y0_in": None,
+            "long_axis": None,
+            "short_axis": None,
+            "status": status,
+        }
+
+    # Make coefficients positive as MATLAB does
+    if A < 0:
+        A, C, D, E = -A, -C, -D, -E
+
+    # Center in the non-tilted (rotated) coordinates
+    X0 = -D / (2 * A)
+    Y0 = -E / (2 * C)
+
+    # Same F expression as MATLAB (because we're fitting ... = 1)
+    F = 1.0 + (D**2) / (4 * A) + (E**2) / (4 * C)
+
+    # Require real axes
+    if F <= 0 or (F / A) <= 0 or (F / C) <= 0:
+        warnings.warn(
+            "fit_ellipse: non-real ellipse parameters (check data / outliers)"
+        )
         return None
 
-    # Extract parameters
-    a, b, c, d, e = a_vec
+    a_axis = np.sqrt(F / A)
+    b_axis = np.sqrt(F / C)
 
-    # Remove orientation
-    if min(abs(b/a), abs(b/c)) > orientation_tolerance:
-        orientation_rad = 0.5 * np.arctan(b / (c - a))
-        cos_phi = np.cos(orientation_rad)
-        sin_phi = np.sin(orientation_rad)
+    long_axis = 2 * max(a_axis, b_axis)
+    short_axis = 2 * min(a_axis, b_axis)
 
-        # Rotated coefficients
-        at = a*cos_phi**2 - b*cos_phi*sin_phi + c*sin_phi**2
-        bt = 0
-        ct = a*sin_phi**2 + b*cos_phi*sin_phi + c*cos_phi**2
-        dt = d*cos_phi - e*sin_phi
-        et = d*sin_phi + e*cos_phi
+    # Rotate center back to original coords (same matrix as MATLAB)
+    R = np.array([[cphi, sphi], [-sphi, cphi]])
+    X0_in, Y0_in = (R @ np.array([X0, Y0])).tolist()
 
-        # Update mean (though mean wasn't removed in original active code,
-        # this tracks the coordinate rotation)
-        mean_xt = cos_phi*mean_x - sin_phi*mean_y
-        mean_yt = sin_phi*mean_x + cos_phi*mean_y
-
-        a, b, c, d, e = at, bt, ct, dt, et
-        mean_x, mean_y = mean_xt, mean_yt
-    else:
-        orientation_rad = 0
-        cos_phi = np.cos(orientation_rad)
-        sin_phi = np.sin(orientation_rad)
-
-    # Check if ellipse
-    test = a * c
-    status = ''
-    if test > 0:
-        status = ''
-    elif test == 0:
-        status = 'Parabola found'
-        warnings.warn('fit_ellipse: Did not locate an ellipse (Parabola)')
-    else:
-        status = 'Hyperbola found'
-        warnings.warn('fit_ellipse: Did not locate an ellipse (Hyperbola)')
-
-    if test > 0:
-        # Make sure coefficients are positive
-        if a < 0:
-            a, c, d, e = -a, -c, -d, -e
-
-        # Final parameters
-        # X0 = -d / (2*a)
-        # Y0 = -e / (2*c)
-        X0 = -d / (2*a)
-        Y0 = -e / (2*c)
-
-        F = 1 + (d**2)/(4*a) + (e**2)/(4*c)
-
-        a_axis = np.sqrt(F / a)
-        b_axis = np.sqrt(F / c)
-
-        long_axis = 2 * max(a_axis, b_axis)
-        short_axis = 2 * min(a_axis, b_axis)
-
-        # Rotate center back
-        R = np.array([[cos_phi, sin_phi], [-sin_phi, cos_phi]])
-        P_in = R @ np.array([X0, Y0])
-        X0_in = P_in[0]
-        Y0_in = P_in[1]
-
-        return {
-            'a': a_axis,
-            'b': b_axis,
-            'phi': orientation_rad,
-            'X0': X0,
-            'Y0': Y0,
-            'X0_in': X0_in,
-            'Y0_in': Y0_in,
-            'long_axis': long_axis,
-            'short_axis': short_axis,
-            'status': status
-        }
-    else:
-        return {
-            'a': None, 'b': None, 'phi': None,
-            'X0': None, 'Y0': None,
-            'X0_in': None, 'Y0_in': None,
-            'long_axis': None, 'short_axis': None,
-            'status': status
-        }
+    return {
+        "a": a_axis,
+        "b": b_axis,
+        "phi": phi,
+        "X0": X0,
+        "Y0": Y0,
+        "X0_in": X0_in,
+        "Y0_in": Y0_in,
+        "long_axis": long_axis,
+        "short_axis": short_axis,
+        "status": "",
+    }
