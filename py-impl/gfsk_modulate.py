@@ -1,74 +1,118 @@
 import numpy as np
-from scipy import signal, integrate
+import scipy.signal as signal
+from scipy.integrate import cumulative_trapezoid
+
 
 def design_gaussian_filter(bt, span, sps):
     """
-    Design a Gaussian FIR pulse-shaping filter.
-    Equivalent to MATLAB's gaussdesign(BT, span, sps).
+    Generates a Gaussian FIR filter pulse to match MATLAB's gaussdesign.
 
     Parameters:
-    - bt: Bandwidth-Time product
-    - span: Filter span in symbols
-    - sps: Samples per symbol
+        bt   : Bandwidth-Time product (usually 0.3 for BLE)
+        span : Filter span in symbols (usually 3)
+        sps  : Samples per symbol
     """
-    # Total number of taps
-    n_taps = int(span * sps)
-    if n_taps % 2 == 0:
-        n_taps += 1  # Ensure odd number of taps for symmetry
+    # Create a time vector centered at 0, covering the span of symbols
+    # We produce (span * sps) + 1 coefficients to match typical FIR designs
+    t = np.linspace(-span / 2, span / 2, int(span * sps) + 1)
 
-    t = np.linspace(-(span/2), (span/2), n_taps)
-    alpha = np.sqrt(np.log(2) / 2) / bt
+    # Calculate the Gaussian coefficients
+    # alpha relates to the bandwidth B
+    alpha = np.sqrt(np.log(2)) / (np.sqrt(2) * bt)
+    h = (np.sqrt(np.pi) / alpha) * np.exp(-((np.pi * t / alpha) ** 2))
 
-    # Gaussian impulse response
-    h = (np.sqrt(np.pi) / alpha) * np.exp(-((np.pi * t) / alpha)**2)
-
-    # Normalize so the sum of coefficients is 1 (standard for smoothing)
-    # Note: In comms, we often normalize energy, but MATLAB's gaussdesign
-    # typically normalizes peak or sum depending on config.
-    # For GFSK frequency pulse, we usually want unit area to maintain phase steps.
+    # Normalize so the sum of coefficients is 1 (0 dB gain)
+    # This ensures the frequency deviation limit is preserved after filtering
     h = h / np.sum(h)
-
     return h
 
-def gfsk_modulate(x, freqsep, fs):
+
+def gfsk_modulate(bits, freq_sep, fs, bt=0.3, span=3):
     """
-    Generates a BLE GFSK signal.
+    Modulates bits using GFSK (Gaussian Frequency Shift Keying).
 
     Parameters:
-    - x: Input binary sequence (array-like of 0s and 1s)
-    - freqsep: Separation frequency (Hz)
-    - fs: Sampling rate (Hz)
+        bits     : Input binary data (list or numpy array of 0s and 1s)
+        freq_sep : Peak-to-peak frequency separation (Hz)
+        fs       : Sampling rate (Hz)
+        bt       : Bandwidth-Time product (default 0.3 for BLE)
+        span     : Symbol span for the filter (default 3)
+
+    Returns:
+        y : Complex baseband IQ signal
     """
-    x = np.array(x)
-    nsample = int(fs / 1e6)  # BLE symbol rate is 1 Msps
+    bits = np.array(bits)
 
-    # Create time vector
-    # MATLAB: t = (1:(nsample*length(x)))*(1/Fs);
-    total_samples = nsample * len(x)
+    # 1. Calculate Samples Per Symbol (SPS)
+    # Assuming symbol rate is 1 Msps (standard for BLE 1M PHY)
+    symbol_rate = 1e6
+    sps = int(fs / symbol_rate)
 
-    # Convert bits to NRZ (Non-Return-to-Zero) pulses: 0 -> -1, 1 -> 1
-    # MATLAB logic: gamma_fsk((((i-1)*nsample)+1):(i*nsample)) = ((x(i)*2)-1);
-    # In Python we can use repeat for efficiency
-    gamma_fsk = np.repeat(x * 2 - 1, nsample)
+    # 2. NRZ Mapping (0 -> -1, 1 -> 1) and Upsampling
+    # We repeat each bit 'sps' times to create the "square wave"
+    x_nrz = (bits * 2) - 1
+    gamma_fsk = np.repeat(x_nrz, sps)
 
-    # Create Gaussian Filter
-    # MATLAB: gaussFilter = gaussdesign(0.3, 3, nsample);
-    gauss_filter = design_gaussian_filter(0.3, 3, nsample)
+    # 3. Gaussian Pulse Shaping
+    # Generate the filter coefficients
+    gauss_coeffs = design_gaussian_filter(bt, span, sps)
 
-    # Apply Filter
-    # MATLAB: gamma_gfsk = filter(gaussFilter, 1, gamma_fsk);
-    gamma_gfsk = signal.lfilter(gauss_filter, 1.0, gamma_fsk)
+    # Apply the filter. lfilter is equivalent to MATLAB's filter (IIR/FIR)
+    # scaling by 1.0 for the denominator (FIR filter)
+    gamma_gfsk = signal.lfilter(gauss_coeffs, 1.0, gamma_fsk)
 
-    # Integrate frequency to get phase
-    # MATLAB: gfsk_phase = (freqsep/Fs)*pi*cumtrapz(gamma_gfsk);
-    # scipy.integrate.cumulative_trapezoid returns array of len N-1 by default,
-    # unless initial=0 is set (available in newer scipy) or we insert 0.
-    # MATLAB's cumtrapz output is same length as input.
-    integrated_gamma = integrate.cumulative_trapezoid(gamma_gfsk, initial=0)
-    gfsk_phase = (freqsep / fs) * np.pi * integrated_gamma
+    # 4. Frequency to Phase Conversion
+    # We integrate the frequency signal to get phase.
+    # cumulative_trapezoid is the equivalent of cumtrapz.
+    # We set initial=0 to ensure the output array length matches the input.
+    theta = (freq_sep / fs) * np.pi * cumulative_trapezoid(gamma_gfsk, initial=0)
 
-    # IQ Modulation
-    # MATLAB: y = exp(1i*gfsk_phase);
-    y = np.exp(1j * gfsk_phase)
+    # 5. IQ Signal Generation
+    y = np.exp(1j * theta)
 
     return y
+
+
+# --- Example Usage ---
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+
+    # Parameters
+    fs = 4e6  # 4 MHz Sampling Rate
+    freq_sep = 500e3  # 500 kHz separation (BLE standard)
+    data_bits = [0, 1, 0, 1, 1, 0, 0, 1]  # Sample bits
+
+    # Modulate
+    iq_signal = gfsk_modulate(data_bits, freq_sep, fs)
+
+    print(f"Generated IQ signal with {len(iq_signal)} samples.")
+    print(iq_signal)
+
+    # Visualization
+    t_axis = np.arange(len(iq_signal)) / fs
+
+    plt.figure(figsize=(10, 6))
+
+    # Plot Real (I) and Imag (Q) components
+    plt.subplot(2, 1, 1)
+    plt.plot(t_axis * 1e6, np.real(iq_signal), label="I (In-Phase)")
+    plt.plot(t_axis * 1e6, np.imag(iq_signal), label="Q (Quadrature)", alpha=0.7)
+    plt.title("GFSK Baseband Signal (I/Q)")
+    plt.ylabel("Amplitude")
+    plt.legend()
+    plt.grid(True)
+
+    # Plot Instantaneous Frequency (approx) to verify Gaussian shaping
+    # Calculate freq from phase difference
+    phase = np.unwrap(np.angle(iq_signal))
+    inst_freq = np.diff(phase) / (2 * np.pi) * fs
+
+    plt.subplot(2, 1, 2)
+    plt.plot(t_axis[:-1] * 1e6, inst_freq / 1e3, color="green")
+    plt.title("Instantaneous Frequency")
+    plt.xlabel("Time (microseconds)")
+    plt.ylabel("Frequency (kHz)")
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.show()
