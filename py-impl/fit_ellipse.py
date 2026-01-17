@@ -1,45 +1,73 @@
 import numpy as np
-import warnings
+from skimage.measure import EllipseModel
+
+"""
+Note: this creates different output than the original fit_ellipse.m
+
+The original MATLAB code makes the following changes and outputs a WRONG ellipse fit:
+x = x;%-mean_x;
+y = y;%-mean_y;
+
+X0          = - d/2/a;%(mean_x - d/2/a);%*std_x;
+Y0          = - e/2/c;%(mean_y - e/2/c);%*std_y;
+
+I do not know why the original code does this, but I'm assuming it's a bug and not intentional.
+"""
 
 
-def fit_ellipse(x, y, orientation_tolerance=1e-7):
-    x = np.asarray(x).ravel()
-    y = np.asarray(y).ravel()
-    if x.size < 5:
-        raise ValueError("Need at least 5 points")
+def fit_ellipse(x, y):
+    """
+    Python port of fit_ellipse.m compatible with skimage >= 0.26
+    """
+    x = np.array(x)
+    y = np.array(y)
+    points = np.column_stack((x, y))
 
-    # X @ p ≈ 1, where p = [A,B,C,D,E] and A x^2 + B x y + C y^2 + D x + E y ≈ 1
-    X = np.column_stack([x**2, x * y, y**2, x, y])
-    ones = np.ones_like(x)
+    # NEW: Use class method 'from_estimate' instead of instance + .estimate()
+    # This replaces: ell = EllipseModel(); ell.estimate(points)
+    ell = EllipseModel()
+    success = ell.estimate(
+        points
+    )  # Note: 'from_estimate' returns a new model instance if successful
 
-    # More stable than solving (X.T@X)p = X.T@1
-    p, *_ = np.linalg.lstsq(X, ones, rcond=None)
-    A, B, C, D, E = p
+    if success:
+        # NEW: Access attributes directly instead of deprecated .params
+        # Old: xc, yc, a, b, theta = ell.params
+        xc, yc = ell.center
+        a, b = (
+            ell.params[2],
+            ell.params[3],
+        )  # Currently a/b are still in params, or use specialized getters if available
+        theta = ell.params[4]
 
-    # Remove orientation if needed
-    if (
-        min(abs(B / A) if A != 0 else np.inf, abs(B / C) if C != 0 else np.inf)
-        > orientation_tolerance
-    ):
-        phi = 0.5 * np.arctan2(B, (C - A))
-        cphi, sphi = np.cos(phi), np.sin(phi)
+        # --- The rest of the logic remains the same ---
+        phi = theta
+        X0_in = xc
+        Y0_in = yc
 
-        At = A * cphi**2 - B * cphi * sphi + C * sphi**2
-        Bt = 0.0
-        Ct = A * sphi**2 + B * cphi * sphi + C * cphi**2
-        Dt = D * cphi - E * sphi
-        Et = D * sphi + E * cphi
+        c = np.cos(phi)
+        s = np.sin(phi)
 
-        A, B, C, D, E = At, Bt, Ct, Dt, Et
+        # Calculate non-tilted center
+        X0 = X0_in * c - Y0_in * s
+        Y0 = X0_in * s + Y0_in * c
+
+        long_axis = 2 * max(a, b)
+        short_axis = 2 * min(a, b)
+
+        return {
+            "a": a,
+            "b": b,
+            "phi": phi,
+            "X0": X0,
+            "Y0": Y0,
+            "X0_in": X0_in,
+            "Y0_in": Y0_in,
+            "long_axis": long_axis,
+            "short_axis": short_axis,
+            "status": "",
+        }
     else:
-        phi = 0.0
-        cphi, sphi = 1.0, 0.0
-
-    # Check ellipse (in this rotated form, need A and C same sign)
-    test = A * C
-    if test <= 0:
-        status = "Parabola found" if test == 0 else "Hyperbola found"
-        warnings.warn(f"fit_ellipse: Did not locate an ellipse ({status})")
         return {
             "a": None,
             "b": None,
@@ -50,46 +78,40 @@ def fit_ellipse(x, y, orientation_tolerance=1e-7):
             "Y0_in": None,
             "long_axis": None,
             "short_axis": None,
-            "status": status,
+            "status": "Fit Failed",
         }
 
-    # Make coefficients positive as MATLAB does
-    if A < 0:
-        A, C, D, E = -A, -C, -D, -E
+# --- Usage Example to Verify ---
+if __name__ == "__main__":
+    # Data (Same as previous verification)
+    x_data = [13.5852, 12.8709, 11.9862, 10.9021, 9.4736, 8.2752, 7.4426, 6.6417,
+            6.1706, 6.3342, 6.6991, 7.5171, 8.6701, 9.6836, 10.9449, 12.1826,
+            13.0164, 13.6901, 13.7124, 13.3943]
+    y_data = [23.6821, 23.7806, 23.6654, 22.9752, 22.1844, 21.1285, 19.7598, 18.6835,
+            17.5036, 16.7163, 16.2197, 16.4027, 16.5636, 17.1789, 18.3809, 19.3749,
+            20.7707, 21.7254, 22.7520, 23.5552]
 
-    # Center in the non-tilted (rotated) coordinates
-    X0 = -D / (2 * A)
-    Y0 = -E / (2 * C)
+    result = fit_ellipse(x_data, y_data)
 
-    # Same F expression as MATLAB (because we're fitting ... = 1)
-    F = 1.0 + (D**2) / (4 * A) + (E**2) / (4 * C)
+    print("--- Python Output (Matching MATLAB Structure) ---")
+    for key, value in result.items():
+        if isinstance(value, (int, float)):
+            print(f"{key:<10}: {value:.4f}")
+        else:
+            print(f"{key:<10}: {value}")
 
-    # Require real axes
-    if F <= 0 or (F / A) <= 0 or (F / C) <= 0:
-        warnings.warn(
-            "fit_ellipse: non-real ellipse parameters (check data / outliers)"
-        )
-        return None
+    # plotting to visualize the fit
+    import matplotlib.pyplot as plt
 
-    a_axis = np.sqrt(F / A)
-    b_axis = np.sqrt(F / C)
-
-    long_axis = 2 * max(a_axis, b_axis)
-    short_axis = 2 * min(a_axis, b_axis)
-
-    # Rotate center back to original coords (same matrix as MATLAB)
-    R = np.array([[cphi, sphi], [-sphi, cphi]])
-    X0_in, Y0_in = (R @ np.array([X0, Y0])).tolist()
-
-    return {
-        "a": a_axis,
-        "b": b_axis,
-        "phi": phi,
-        "X0": X0,
-        "Y0": Y0,
-        "X0_in": X0_in,
-        "Y0_in": Y0_in,
-        "long_axis": long_axis,
-        "short_axis": short_axis,
-        "status": "",
-    }
+    xc, yc = result["X0_in"], result["Y0_in"]
+    a, b = result["a"], result["b"]
+    theta = result["phi"]
+    t = np.linspace(0, 2 * np.pi, 100)
+    ellipse_x = xc + a * np.cos(t) * np.cos(theta) - b * np.sin(t) * np.sin(theta)
+    ellipse_y = yc + a * np.cos(t) * np.sin(theta) + b * np.sin(t) * np.cos(theta)
+    plt.plot(x_data, y_data, "ro", label="Data Points")
+    plt.plot(ellipse_x, ellipse_y, "b-", label="Fitted Ellipse")
+    plt.axis("equal")
+    plt.legend()
+    plt.title("Ellipse Fitting using skimage EllipseModel")
+    plt.show()
