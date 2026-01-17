@@ -10,6 +10,10 @@ def main():
     print("fingerprint matrix shape:", fingerprints.shape)
     print("elapsed seconds:", elapsed)
 
+    # print fingerprints matrix
+    print("fingerprints:")
+    print(fingerprints)
+
 
 if __name__ == "__main__":
     main()

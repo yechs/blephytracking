@@ -31,10 +31,15 @@ def fit_ellipse(x: np.ndarray, y: np.ndarray) -> EllipseFit:
     X = np.column_stack((x**2, x * y, y**2, x, y))
     a_vec = np.sum(X, axis=0) @ np.linalg.inv(X.T @ X)
 
-    a, b, c, d, e = a_vec
+    A, B, C, D, E = a_vec
+    a, b, c, d, e = A, B, C, D, E
 
     if min(abs(b / a), abs(b / c)) > orientation_tolerance:
-        orientation_rad = 0.5 * math.atan2(b, (c - a))
+        denom = c - a
+        if abs(denom) < 1e-12:
+            orientation_rad = 0.25 * math.pi * math.copysign(1.0, b if b != 0 else 1.0)
+        else:
+            orientation_rad = 0.5 * math.atan(b / denom)
         cos_phi = math.cos(orientation_rad)
         sin_phi = math.sin(orientation_rad)
         a, b, c, d, e = (
@@ -72,8 +77,8 @@ def fit_ellipse(x: np.ndarray, y: np.ndarray) -> EllipseFit:
     if a < 0:
         a, c, d, e = -a, -c, -d, -e
 
-    X0 = -d / (2 * a)
-    Y0 = -e / (2 * c)
+    X0_axis = -d / (2 * a)
+    Y0_axis = -e / (2 * c)
     F = 1 + (d**2) / (4 * a) + (e**2) / (4 * c)
     a_axis = math.sqrt(abs(F / a))
     b_axis = math.sqrt(abs(F / c))
@@ -81,16 +86,26 @@ def fit_ellipse(x: np.ndarray, y: np.ndarray) -> EllipseFit:
     short_axis = 2 * min(a_axis, b_axis)
 
     R = np.array([[cos_phi, sin_phi], [-sin_phi, cos_phi]])
-    X0_in, Y0_in = (R @ np.array([X0, Y0])).tolist()
+    axis_center = R @ np.array([X0_axis, Y0_axis])
+
+    try:
+        center = np.linalg.solve(np.array([[2 * A, B], [B, 2 * C]]), np.array([-D, -E]))
+    except np.linalg.LinAlgError:
+        center = axis_center
+    else:
+        if not np.isfinite(center).all():
+            center = axis_center
+
+    X0_center, Y0_center = center.tolist()
 
     return EllipseFit(
         a=a_axis,
         b=b_axis,
         phi=orientation_rad,
-        X0=X0,
-        Y0=Y0,
-        X0_in=X0_in,
-        Y0_in=Y0_in,
+        X0=X0_center,
+        Y0=Y0_center,
+        X0_in=X0_center,
+        Y0_in=Y0_center,
         long_axis=long_axis,
         short_axis=short_axis,
         status="",

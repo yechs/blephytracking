@@ -12,8 +12,9 @@ def run_example(
     n_partition: int = 250,
     fingerprint_size: int = 25,
 ):
-    fingerprint_all = np.zeros((20, fingerprint_size))
-    for i in range(1, 21):
+    SAMPLES_SIZE = 20
+    fingerprint_all = np.zeros((SAMPLES_SIZE, fingerprint_size))
+    for i in range(1, SAMPLES_SIZE + 1):
         sample_path = f"{data_dir}/{i}"
         signal = np.fromfile(sample_path, dtype=np.float32)
         signal = signal.reshape(-1, 2)
