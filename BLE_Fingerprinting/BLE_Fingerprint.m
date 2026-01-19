@@ -102,7 +102,7 @@ if length(fingerprint_vec) ~= 25
     flag=0;
 end
 
-
+fingerprint = nan(1,25);
 if error(end) < 0.45 && flag == 1
-    fingerprint = [fingerprint;fingerprint_vec];
+    fingerprint = fingerprint_vec;
 end
