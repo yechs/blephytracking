@@ -105,6 +105,8 @@ def ble_imperfection_estimator_nagd(
         xr     = x2[r]
         xr_re  = np.real(xr)
         xr_im  = np.imag(xr)
+        denom_sum = np.dot(xr_re, xr_re) + np.dot(xr_im, xr_im)  # constant within partition
+
 
         # ---------- Initialisation ------------------------------------ #
         e_new       = float(init_e)
@@ -184,7 +186,11 @@ def ble_imperfection_estimator_nagd(
             err_im = xr_im - Imag_part
 
             # ---- Gradients from imaginary error ---- #
-            e_d = -np.mean(err_im * (-rot_re * sin_phase + rot_im * cos_phase))
+            # e_d = -np.mean(err_im * (-rot_re * sin_phase + rot_im * cos_phase))
+            N = err_im.size
+            invN = 1.0 / N
+            e_d = (np.einsum('i,i,i->', err_im, rot_re, sin_phase)
+                - np.einsum('i,i,i->', err_im, rot_im, cos_phase)) * invN
 
             phi_d = -np.mean(err_im * (
                 (amp - e) * (-esp_re * sin_phi + esp_im * cos_phi) * sin_phase
@@ -268,9 +274,13 @@ def ble_imperfection_estimator_nagd(
             est_re2 = A2 * cos_phase2 - B2 * sin_phase2
             est_im2 = A2 * sin_phase2 + B2 * cos_phase2
 
-            diff_sq = (est_re2 - xr_re)**2 + (est_im2 - xr_im)**2
-            denom   = xr_re**2 + xr_im**2
-            nmse    = np.sum(diff_sq) / np.sum(denom) / 2.0
+            # diff_sq = (est_re2 - xr_re)**2 + (est_im2 - xr_im)**2
+            # denom   = xr_re**2 + xr_im**2
+            # nmse    = np.sum(diff_sq) / np.sum(denom) / 2.0
+            e_re = est_re2 - xr_re
+            e_im = est_im2 - xr_im
+            num = np.dot(e_re, e_re) + np.dot(e_im, e_im)  # sum of squares, no extra big arrays
+            nmse = num / (2.0 * denom_sum)
             error_list.append(nmse)
 
             if len(error_list) > 1 and error_list[-1] < err_thresh:
