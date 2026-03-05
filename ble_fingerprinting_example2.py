@@ -40,7 +40,7 @@ snr              = 40        # SNR (dB)
 preamble_detect  = True
 interp_fac       = 32
 n_partition      = 250
-fingerprint_size = 1
+fingerprint_size = 25
 n_signals        = 20
 # ─────────────────────────────────────────────────────────────────────────── #
 
