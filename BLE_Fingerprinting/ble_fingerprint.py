@@ -90,94 +90,94 @@ def ble_fingerprint(
     est_cfo    = float(np.mean(pream_freq))
     est_cfo2   = est_cfo if abs(est_cfo) <= 100e3 else 0.0
 
-    # ------------------------------------------------------------------ #
-    # 6.  NAGD imperfection estimation
-    # ------------------------------------------------------------------ #
-    amp, epsilon, phi, I, Q, IQO, IQI, f0, phi_off, error = \
-        ble_imperfection_estimator_nagd(
-            signal, bits, fs_interp, est_cfo2,
-            0.0, 0.0, 0.0, 0.0, 1.0, snr, n_partition,
-        )
+    # # ------------------------------------------------------------------ #
+    # # 6.  NAGD imperfection estimation
+    # # ------------------------------------------------------------------ #
+    # amp, epsilon, phi, I, Q, IQO, IQI, f0, phi_off, error = \
+    #     ble_imperfection_estimator_nagd(
+    #         signal, bits, fs_interp, est_cfo2,
+    #         0.0, 0.0, 0.0, 0.0, 1.0, snr, n_partition,
+    #     )
 
     # ------------------------------------------------------------------ #
     # 7.  Frequency / phase correction
     # ------------------------------------------------------------------ #
-    tt     = np.arange(len(signal)) / fs_interp
-    signal = signal * np.exp(-1j * (2.0 * np.pi * f0 * tt
-                                    + phi_off / (360.0 / (2.0 * np.pi))))
+    # tt     = np.arange(len(signal)) / fs_interp
+    # signal = signal * np.exp(-1j * (2.0 * np.pi * f0 * tt
+    #                                 + phi_off / (360.0 / (2.0 * np.pi))))
 
-    # ------------------------------------------------------------------ #
-    # 8.  Ellipse fit on shuffled I/Q constellation
-    # ------------------------------------------------------------------ #
-    flag = True
-    try:
-        sig_shuffled = signal[np.random.permutation(len(signal))]
-        ell = fit_ellipse(
-            -np.real(sig_shuffled) / amp * 5.0,
-             3.0 * np.imag(sig_shuffled) / amp,
-        )
-    except (ValueError, ZeroDivisionError):
-        warnings.warn("Ill ellipse")
-        flag = False
-        return fingerprint, bits
+    # # ------------------------------------------------------------------ #
+    # # 8.  Ellipse fit on shuffled I/Q constellation
+    # # ------------------------------------------------------------------ #
+    # flag = True
+    # try:
+    #     sig_shuffled = signal[np.random.permutation(len(signal))]
+    #     ell = fit_ellipse(
+    #         -np.real(sig_shuffled) / amp * 5.0,
+    #          3.0 * np.imag(sig_shuffled) / amp,
+    #     )
+    # except (ValueError, ZeroDivisionError):
+    #     warnings.warn("Ill ellipse")
+    #     flag = False
+    #     return fingerprint, bits
 
-    # ------------------------------------------------------------------ #
-    # 9.  Quadrant signal statistics (8 angular segments)
-    # ------------------------------------------------------------------ #
-    angsig = np.angle(signal)   # in (-π, π]
-    spl    = 8
-    quar   = np.zeros(spl, dtype=complex)
+    # # ------------------------------------------------------------------ #
+    # # 9.  Quadrant signal statistics (8 angular segments)
+    # # ------------------------------------------------------------------ #
+    # angsig = np.angle(signal)   # in (-π, π]
+    # spl    = 8
+    # quar   = np.zeros(spl, dtype=complex)
 
-    for sp in range(1, spl // 2 + 1):
-        lo = (sp - 1) * 2.0 * np.pi / spl
-        hi =  sp      * 2.0 * np.pi / spl
-        mask = (angsig > lo) & (angsig < hi)
-        quar[sp - 1] = np.mean(signal[mask]) if np.any(mask) else 0.0
+    # for sp in range(1, spl // 2 + 1):
+    #     lo = (sp - 1) * 2.0 * np.pi / spl
+    #     hi =  sp      * 2.0 * np.pi / spl
+    #     mask = (angsig > lo) & (angsig < hi)
+    #     quar[sp - 1] = np.mean(signal[mask]) if np.any(mask) else 0.0
 
-        lo2 = -np.pi + (sp - 1) * 2.0 * np.pi / spl
-        hi2 = -np.pi +  sp      * 2.0 * np.pi / spl
-        mask2 = (angsig > lo2) & (angsig < hi2)
-        quar[sp - 1 + spl // 2] = np.mean(signal[mask2]) if np.any(mask2) else 0.0
+    #     lo2 = -np.pi + (sp - 1) * 2.0 * np.pi / spl
+    #     hi2 = -np.pi +  sp      * 2.0 * np.pi / spl
+    #     mask2 = (angsig > lo2) & (angsig < hi2)
+    #     quar[sp - 1 + spl // 2] = np.mean(signal[mask2]) if np.any(mask2) else 0.0
 
     # ------------------------------------------------------------------ #
     # 10. Assemble 25-D fingerprint vector
     # ------------------------------------------------------------------ #
-    quar_mean   = np.mean(quar)
-    sig_re_mean = np.mean(np.real(signal))
-    sig_im_mean = np.mean(np.imag(signal))
+    # quar_mean   = np.mean(quar)
+    # sig_re_mean = np.mean(np.real(signal))
+    # sig_im_mean = np.mean(np.imag(signal))
 
     fingerprint_vec = np.array([
-        error,                                                  # 0
-        amp,                                                    # 1
-        f0,                                                     # 2
+        # error,                                                  # 0
+        # amp,                                                    # 1
+        # f0,                                                     # 2
         est_cfo,                                                # 3
-        IQO,                                                    # 4
-        I,                                                      # 5
-        Q,                                                      # 6
-        np.sqrt(I**2 + Q**2),                                   # 7
-        IQI,                                                    # 8
-        epsilon,                                                # 9
-        phi,                                                    # 10
-        ell.X0   / ell.a,                                       # 11
-        ell.Y0   / ell.b,                                       # 12
-        ell.X0_in / ell.a,                                      # 13
-        ell.Y0_in / ell.b,                                      # 14
-        np.sqrt((ell.X0   / ell.a)**2 + (ell.Y0   / ell.b)**2),# 15
-        np.sqrt((ell.X0_in / ell.a)**2 + (ell.Y0_in / ell.b)**2),# 16
-        ell.a * 3.0 / ell.b / 5.0,                             # 17
-        ell.phi,                                                # 18
-        np.real(quar_mean),                                     # 19
-        np.imag(quar_mean),                                     # 20
-        np.abs(quar_mean),                                      # 21
-        sig_re_mean,                                            # 22
-        sig_im_mean,                                            # 23
-        np.abs(sig_re_mean + 1j * sig_im_mean),                 # 24
+        # IQO,                                                    # 4
+        # I,                                                      # 5
+        # Q,                                                      # 6
+        # np.sqrt(I**2 + Q**2),                                   # 7
+        # IQI,                                                    # 8
+        # epsilon,                                                # 9
+        # phi,                                                    # 10
+        # ell.X0   / ell.a,                                       # 11
+        # ell.Y0   / ell.b,                                       # 12
+        # ell.X0_in / ell.a,                                      # 13
+        # ell.Y0_in / ell.b,                                      # 14
+        # np.sqrt((ell.X0   / ell.a)**2 + (ell.Y0   / ell.b)**2),# 15
+        # np.sqrt((ell.X0_in / ell.a)**2 + (ell.Y0_in / ell.b)**2),# 16
+        # ell.a * 3.0 / ell.b / 5.0,                             # 17
+        # ell.phi,                                                # 18
+        # np.real(quar_mean),                                     # 19
+        # np.imag(quar_mean),                                     # 20
+        # np.abs(quar_mean),                                      # 21
+        # sig_re_mean,                                            # 22
+        # sig_im_mean,                                            # 23
+        # np.abs(sig_re_mean + 1j * sig_im_mean),                 # 24
     ], dtype=float)
 
     if len(fingerprint_vec) != 25:
         flag = False
 
-    if error < 0.45 and flag:
-        fingerprint = fingerprint_vec
+    # if error < 0.45 and flag:
+    fingerprint = fingerprint_vec
 
     return fingerprint, bits
