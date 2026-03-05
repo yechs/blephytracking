@@ -55,6 +55,9 @@ def ble_imperfection_estimator_nagd(
         phi_off – phase offset in degrees (average)
         error   – worst-case NMSE across all partitions (scalar float)
     """
+    two_pi = 2.0 * np.pi
+    rad2deg = 180.0 / np.pi
+
     snr_lin = 10.0 ** (snr_db / 20.0)
     err_thresh = max(0.4, 1.0 / (snr_lin + 1.0))
 
@@ -85,6 +88,7 @@ def ble_imperfection_estimator_nagd(
     n       = min(10, n_partition)
     min_len = min(len(est_signal_perfect2), len(x2))
     l       = max(1, int(min_len / n_partition))
+    tt_full = t2[: len(x2)]
 
     # Accumulators across partitions
     I2 = Q2 = IQO2 = IQI2 = e2 = phi2 = phi_off2 = f02 = amp2 = 0.0
@@ -96,7 +100,7 @@ def ble_imperfection_estimator_nagd(
 
     for inter in range(n):
         # Random subset of indices shared by ref signal, time vector, and data
-        r = np.random.permutation(min_len)[:l]
+        r = np.random.choice(min_len, size=l, replace=False)
 
         esp    = est_signal_perfect2[r]
         esp_re = np.real(esp)
@@ -118,8 +122,8 @@ def ble_imperfection_estimator_nagd(
         else:
             f0_new  = f0
             init_f0 = f0
-        w0_new      = 2.0 * np.pi * f0_new
-        phi_off_new = 36.0 / 360.0 * 2.0 * np.pi   # initial phase offset (radians)
+        w0_new      = two_pi * f0_new
+        phi_off_new = 36.0 / 360.0 * two_pi   # initial phase offset (radians)
         amp_new     = float(init_amp)
 
         # Working copies (Nesterov lookahead will modify these)
@@ -137,7 +141,8 @@ def ble_imperfection_estimator_nagd(
         error_diff  = 1.0
         count       = 0
         rnd         = 1
-        error_list  = [1.0]
+        prev_nmse   = 1.0
+        curr_nmse   = 1.0
 
         lr  = 1e-3
         mom = 0.9
@@ -156,15 +161,15 @@ def ble_imperfection_estimator_nagd(
             # amp = amp_new (commented out in original)
 
             # Re-initialise CFO if convergence is stalled
-            if count > rnd * 200 and error_list[-1] > err_thresh:
+            if count > rnd * 200 and curr_nmse > err_thresh:
                 if (rnd // 2) * 2 == rnd - 1:
                     rnd    += 1
                     f0      = init_f0 - (rnd // 2) * 1.5e3
-                    w0_new  = 2.0 * np.pi * f0
+                    w0_new  = two_pi * f0
                 else:
                     rnd    += 1
                     f0      = init_f0 + (rnd / 2.0) * 1.5e3
-                    w0_new  = 2.0 * np.pi * f0
+                    w0_new  = two_pi * f0
 
             # Pre-compute shared trig / rotation terms
             phase     = w0 * t + phi_off
@@ -186,54 +191,52 @@ def ble_imperfection_estimator_nagd(
             err_im = xr_im - Imag_part
 
             # ---- Gradients from imaginary error ---- #
-            # e_d = -np.mean(err_im * (-rot_re * sin_phase + rot_im * cos_phase))
             N = err_im.size
             invN = 1.0 / N
-            e_d = (np.einsum('i,i,i->', err_im, rot_re, sin_phase)
-                - np.einsum('i,i,i->', err_im, rot_im, cos_phase)) * invN
+            d_rot_re_dphi = -esp_re * sin_phi + esp_im * cos_phi
+            d_rot_im_dphi =  esp_re * cos_phi - esp_im * sin_phi
+            tr_A = t * A_re
+            tr_B = t * B_im
+            rot_re_plus_I = rot_re + I
+            rot_im_plus_Q = rot_im + Q
 
-            phi_d = -np.mean(err_im * (
-                (amp - e) * (-esp_re * sin_phi + esp_im * cos_phi) * sin_phase
-                + (amp + e) * ( esp_re * cos_phi - esp_im * sin_phi) * cos_phase
-            ))
+            e_d = (
+                np.dot(err_im, rot_re * sin_phase)
+                - np.dot(err_im, rot_im * cos_phase)
+            ) * invN
 
-            I_d       = -np.mean(err_im * sin_phase)
-            Q_d       = -np.mean(err_im * cos_phase)
+            phi_im_term = (
+                (amp - e) * d_rot_re_dphi * sin_phase
+                + (amp + e) * d_rot_im_dphi * cos_phase
+            )
+            phi_d = -np.dot(err_im, phi_im_term) * invN
 
-            w0_d = -np.mean(err_im * (
-                t * A_re * cos_phase - t * B_im * sin_phase
-            ))
+            I_d       = -np.dot(err_im, sin_phase) * invN
+            Q_d       = -np.dot(err_im, cos_phase) * invN
 
-            phi_off_d = -np.mean(err_im * (
-                A_re * cos_phase - B_im * sin_phase
-            ))
+            w0_d = -np.dot(err_im, tr_A * cos_phase - tr_B * sin_phase) * invN
 
-            amp_d = -np.mean(err_im * (
-                (rot_re + I) * sin_phase + (rot_im + Q) * cos_phase
-            ))
+            phi_off_d = -np.dot(err_im, A_re * cos_phase - B_im * sin_phase) * invN
+
+            amp_d = -np.dot(err_im, rot_re_plus_I * sin_phase + rot_im_plus_Q * cos_phase) * invN
 
             # ---- Add gradients from real error ---- #
-            e_d -= np.mean(err_re * (-rot_re * cos_phase - rot_im * sin_phase))
+            e_d += np.dot(err_re, rot_re * cos_phase + rot_im * sin_phase) * invN
 
-            phi_d -= np.mean(err_re * (
-                (amp - e) * (-esp_re * sin_phi + esp_im * cos_phi) * cos_phase
-                - (amp + e) * ( esp_re * cos_phi - esp_im * sin_phi) * sin_phase
-            ))
+            phi_re_term = (
+                (amp - e) * d_rot_re_dphi * cos_phase
+                - (amp + e) * d_rot_im_dphi * sin_phase
+            )
+            phi_d -= np.dot(err_re, phi_re_term) * invN
 
-            I_d       -= np.mean(err_re *  cos_phase)
-            Q_d       += np.mean(err_re *  sin_phase)
+            I_d       -= np.dot(err_re, cos_phase) * invN
+            Q_d       += np.dot(err_re, sin_phase) * invN
 
-            w0_d -= np.mean(err_re * (
-                -t * A_re * sin_phase - t * B_im * cos_phase
-            ))
+            w0_d += np.dot(err_re, tr_A * sin_phase + tr_B * cos_phase) * invN
 
-            phi_off_d -= np.mean(err_re * (
-                -A_re * sin_phase - B_im * cos_phase
-            ))
+            phi_off_d += np.dot(err_re, A_re * sin_phase + B_im * cos_phase) * invN
 
-            amp_d -= np.mean(err_re * (
-                (rot_re + I) * cos_phase - (rot_im + Q) * sin_phase
-            ))
+            amp_d -= np.dot(err_re, rot_re_plus_I * cos_phase - rot_im_plus_Q * sin_phase) * invN
 
             # ---- Momentum update ------------------------------------ #
             e_t       = mom * e_t       + lr        * e_d
@@ -281,18 +284,20 @@ def ble_imperfection_estimator_nagd(
             e_im = est_im2 - xr_im
             num = np.dot(e_re, e_re) + np.dot(e_im, e_im)  # sum of squares, no extra big arrays
             nmse = num / (2.0 * denom_sum)
-            error_list.append(nmse)
+            prev_nmse = curr_nmse
+            curr_nmse = nmse
 
-            if len(error_list) > 1 and error_list[-1] < err_thresh:
-                error_diff = abs(error_list[-1] - error_list[-2])
+            if curr_nmse < err_thresh:
+                error_diff = abs(curr_nmse - prev_nmse)
 
         # Worst-case error
-        err = max(err, error_list[-1])
+        err = max(err, curr_nmse)
 
         # Apply correction to full x2 and fit ellipse
-        tt        = t2[: len(x2)]
-        corrected = x2 * np.exp(-1j * (w0 * tt + phi_off))
+        corrected = x2 * np.exp(-1j * (w0 * tt_full + phi_off))
 
+        IQO = 0.0
+        IQI = 0.0
         try:
             ell  = fit_ellipse(np.real(corrected), 3.0 * np.imag(corrected))
             IQO  = np.sqrt((ell.X0 / ell.a)**2 + (ell.Y0 / ell.b)**2)
@@ -303,9 +308,9 @@ def ble_imperfection_estimator_nagd(
 
         if flag:
             # Convert frequency / phase to output units
-            f0_part      = w0 / (2.0 * np.pi)
-            phi_off_part = phi_off * (360.0 / (2.0 * np.pi))   # radians → degrees
-            phi_part     = phi     * (360.0 / (2.0 * np.pi))   # radians → degrees
+            f0_part      = w0 / two_pi
+            phi_off_part = phi_off * rad2deg
+            phi_part     = phi     * rad2deg
 
             # Note: `amp` here is still the gradient-descent final value (in radians
             # domain), matching the MATLAB variable at this point in the loop.
