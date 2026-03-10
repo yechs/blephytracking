@@ -20,11 +20,14 @@ for i = 1:20
     signal = reshape(signal, 2, []).';
     signal = signal(:,1) + 1i * signal(:,2);
     signal(1:10,:);
-    
+
     signal = signal(1:end-12);
-    
+
     % Physical layer fingerprinting
     [fingerprint,bits] = BLE_Fingerprint(signal,snr,Fs,preamble_detect,interp_fac,n_partition);
     fingerprint_all(i,:) = fingerprint;
 end
-toc       
+toc
+
+% save fingerprint_all to a .mat file
+save('fingerprint_all.mat', 'fingerprint_all');

@@ -87,8 +87,7 @@ def ble_imperfection_estimator_nagd(
     # Partition length
     n       = min(10, n_partition)
     min_len = min(len(est_signal_perfect2), len(x2))
-    l       = max(1, int(min_len / n_partition))
-    tt_full = t2[: len(x2)]
+    l       = max(1, int(len(x2) / n_partition))
 
     # Accumulators across partitions
     I2 = Q2 = IQO2 = IQI2 = e2 = phi2 = phi_off2 = f02 = amp2 = 0.0
@@ -293,8 +292,9 @@ def ble_imperfection_estimator_nagd(
         # Worst-case error
         err = max(err, curr_nmse)
 
-        # Apply correction to full x2 and fit ellipse
-        corrected = x2 * np.exp(-1j * (w0 * tt_full + phi_off))
+        # Apply correction on the current random partition and fit ellipse
+        # (matches MATLAB: signal = x.*exp(-1j*(w0*t'+phi_off)); fit_ellipse(...))
+        corrected = xr * np.exp(-1j * (w0 * t + phi_off))
 
         IQO = 0.0
         IQI = 0.0

@@ -91,6 +91,43 @@ def main():
     np.set_printoptions(precision=4, suppress=True, linewidth=120)
     print(fingerprint_all)
 
+    # save to CSV file
+    FINGERPRINT_COLUMNS = [
+        "error",
+        "amp",
+        "f0",
+        "est_cfo",
+        "IQO",
+        "I",
+        "Q",
+        "IQ_magnitude",
+        "IQI",
+        "epsilon",
+        "phi",
+        "ell_x0_norm",
+        "ell_y0_norm",
+        "ell_x0_in_norm",
+        "ell_y0_in_norm",
+        "ell_offset_norm",
+        "ell_offset_in_norm",
+        "ell_axis_ratio",
+        "ell_phi",
+        "quar_mean_re",
+        "quar_mean_im",
+        "quar_mean_abs",
+        "sig_re_mean",
+        "sig_im_mean",
+        "sig_mean_abs",
+    ]
+
+    # write header and data to CSV
+    header = ", ".join(f'"{col}"' for col in FINGERPRINT_COLUMNS)
+    with open("fingerprint_all.csv", "w") as f:
+        f.write(header + "\n")
+        for row in fingerprint_all:
+            f.write(", ".join(f"{val:.4f}" for val in row) + "\n")
+    print("\nFingerprint matrix saved to 'fingerprint_all.csv'.")
+
     return fingerprint_all
 
 
