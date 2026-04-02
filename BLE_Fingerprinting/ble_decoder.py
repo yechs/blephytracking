@@ -32,6 +32,7 @@ def ble_decode(signal: np.ndarray, fs: float, preamble_detect: bool = True):
     # ------------------------------------------------------------------ #
     #  Reference preamble in frequency domain
     # ------------------------------------------------------------------ #
+    # TODO: fix the logic to be the correct preamble bits (1,0,1,0,1,0,1,0)
     pream_bits = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
     preamble_signal = gfsk_modulate(pream_bits, 500e3, fs)
 
@@ -67,6 +68,7 @@ def ble_decode(signal: np.ndarray, fs: float, preamble_detect: bool = True):
         # MATLAB xcorr(signal_freq, preamble_freq) zero-lag at index l-1 (0-indexed).
         # MATLAB z = z(l+1:end)  →  positive lags starting at lag 1
         # In scipy that corresponds to output[len(preamble_freq):]
+        # TODO: maybe need normalization?
         p_len = len(preamble_freq)
         z_full = correlate(signal_freq, preamble_freq, mode="full")
         z_causal = z_full[p_len:]   # positive lags, length = l - 1
@@ -79,10 +81,13 @@ def ble_decode(signal: np.ndarray, fs: float, preamble_detect: bool = True):
             # MATLAB max() on same slice gives 1-indexed position = argmax + 1
             # MATLAB then uses that as signal(start_ind:end) (1-indexed)
             # → Python equivalent: signal[argmax:]
-            start_ind = int(np.argmax(np.abs(z_slice)))
+            # TODO: add search_start?
+            start_ind = int(np.argmax(np.abs(z_slice))) + search_start
         else:
             start_ind = 0
-            
+    
+    # print
+    print(f"Preamble detected at sample index {start_ind} (symbol {start_ind / 33:.6f})")
 
     signal = signal[start_ind:]
     signal_freq = signal_freq[start_ind:]
