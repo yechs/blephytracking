@@ -176,6 +176,8 @@ def ble_fingerprint(
 
     if len(fingerprint_vec) != 25:
         flag = False
+        
+    print(fingerprint_vec)
 
     if error < 0.45 and flag:
         fingerprint = fingerprint_vec
