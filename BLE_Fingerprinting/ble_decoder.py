@@ -83,10 +83,6 @@ def ble_decode(signal: np.ndarray, fs: float, preamble_detect: bool = True):
         else:
             start_ind = 0
             
-    print(f"Detected preamble start index: {start_ind / 32}")
-    print(f"Detected preamble start index: {(start_ind + search_start) / 32}")
-    print(f"Detected preamble start index: {start_ind}")
-    print(f"Detected preamble start index: {(start_ind + search_start)}")
 
     signal = signal[start_ind:]
     signal_freq = signal_freq[start_ind:]
