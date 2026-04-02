@@ -44,7 +44,7 @@ def ble_decode(signal: np.ndarray, fs: float, preamble_detect: bool = True):
     # Instantaneous frequency of preamble: forward difference of unwrapped phase
     pream_angle = np.unwrap(np.angle(preamble_signal))
     preamble_freq = (pream_angle[1:] - pream_angle[:-1]) / (2.0 * np.pi) * fs
-
+ 
     # ------------------------------------------------------------------ #
     #  Instantaneous frequency of received signal
     #  MATLAB uses a 1-sample-offset forward difference (samples 3:end minus 2:end-1)
